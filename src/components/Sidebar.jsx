@@ -21,7 +21,7 @@ function Sidebar({ activePage, setActivePage }) {
     <aside className="sidebar">
 
       <div className="sidebar-logo">
-        <h2>🏥 City Care</h2>
+        <h2>🏥 Semasa Care</h2>
         <p>Hospital Management</p>
       </div>
 
@@ -36,9 +36,8 @@ function Sidebar({ activePage, setActivePage }) {
               type="button"
               key={item.name}
               onClick={() => setActivePage(item.name)}
-              className={`menu-item ${
-                activePage === item.name ? "active" : ""
-              }`}
+              className={`menu-item ${activePage === item.name ? "active" : ""
+                }`}
             >
               <Icon size={19} />
               <span>{item.name}</span>

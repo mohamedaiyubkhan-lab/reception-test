@@ -1,5 +1,6 @@
 
 import React, { useEffect, useState } from "react";
+
 import {
   CalendarDays,
   Plus,
@@ -8,20 +9,20 @@ import {
   Trash2,
   X,
   Clock,
-  Users,
   CheckCircle,
   AlertCircle,
   Stethoscope,
   CalendarCheck,
   Phone
 } from "lucide-react";
+
 import "./Appointments.css";
+
 import {
   getAppointments,
   saveAppointments
 } from "../utils/appointmentStorage";
 
-const APPOINTMENT_KEY = "hospital_appointments";
 const PATIENT_KEY = "hospitalPatients";
 const DOCTOR_KEY = "hospitalDoctorAvailability";
 
@@ -67,21 +68,98 @@ const emptyForm = {
   status: "Pending"
 };
 
-function loadArray(key, fallback = []) {
+const loadArray = (key, fallback = []) => {
   try {
-    const saved = JSON.parse(localStorage.getItem(key) || "null");
+    const saved = JSON.parse(
+      localStorage.getItem(key) || "null"
+    );
+
     return Array.isArray(saved) ? saved : fallback;
-  } catch {
+  } catch (error) {
+    console.error(`Unable to load ${key}:`, error);
     return fallback;
   }
-}
+};
+
+const getPatientName = (patient) =>
+  patient?.name ||
+  patient?.patientName ||
+  patient?.patient ||
+  "";
+
+const getPatientId = (patient) =>
+  patient?.patientId ||
+  patient?.patient_id ||
+  patient?.id ||
+  "";
+
+const getPatientDetails = (patient) => {
+  const details =
+    patient?.patientDetails ||
+    patient?.patientInfo ||
+    patient?.personalDetails ||
+    {};
+
+  return {
+    patientId:
+      getPatientId(patient) ||
+      details.patientId ||
+      details.id ||
+      "",
+
+    age:
+      patient?.age ||
+      patient?.patientAge ||
+      details.age ||
+      "",
+
+    gender:
+      patient?.gender ||
+      patient?.patientGender ||
+      details.gender ||
+      "",
+
+    phone:
+      patient?.phone ||
+      patient?.mobile ||
+      patient?.mobileNumber ||
+      patient?.phoneNumber ||
+      details.phone ||
+      details.mobile ||
+      "",
+
+    email:
+      patient?.email ||
+      patient?.patientEmail ||
+      patient?.emailAddress ||
+      details.email ||
+      details.patientEmail ||
+      "",
+
+    bloodGroup:
+      patient?.bloodGroup ||
+      patient?.bloodType ||
+      patient?.patientBloodGroup ||
+      details.bloodGroup ||
+      details.bloodType ||
+      "",
+
+    address:
+      patient?.address ||
+      patient?.patientAddress ||
+      patient?.fullAddress ||
+      details.address ||
+      details.patientAddress ||
+      ""
+  };
+};
 
 function Appointments() {
-const [appointments, setAppointments] = useState(() =>
-  getAppointments()
-);
+  const [appointments, setAppointments] = useState(() =>
+    loadArray("hospital_appointments")
+  );
 
-  const [patients] = useState(() =>
+  const [patients, setPatients] = useState(() =>
     loadArray(PATIENT_KEY)
   );
 
@@ -94,13 +172,62 @@ const [appointments, setAppointments] = useState(() =>
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState(emptyForm);
 
-  // useEffect(() => {
-  //   localStorage.setItem(
-  //     APPOINTMENT_KEY,
-  //     JSON.stringify(appointments)
-  //   );
-  // }, [appointments]);
+  // Refresh patients and appointments
+  useEffect(() => {
+    const refreshPatients = () => {
+      setPatients(loadArray(PATIENT_KEY));
+    };
 
+    const refreshAppointments = () => {
+      setAppointments(loadArray("hospital_appointments"));
+    };
+
+    refreshPatients();
+
+    window.addEventListener(
+      "patients-updated",
+      refreshPatients
+    );
+
+    window.addEventListener(
+      "appointments-updated",
+      refreshAppointments
+    );
+
+    window.addEventListener(
+      "storage",
+      refreshPatients
+    );
+
+    window.addEventListener(
+      "storage",
+      refreshAppointments
+    );
+
+    return () => {
+      window.removeEventListener(
+        "patients-updated",
+        refreshPatients
+      );
+
+      window.removeEventListener(
+        "appointments-updated",
+        refreshAppointments
+      );
+
+      window.removeEventListener(
+        "storage",
+        refreshPatients
+      );
+
+      window.removeEventListener(
+        "storage",
+        refreshAppointments
+      );
+    };
+  }, []);
+
+  // Save doctor availability
   useEffect(() => {
     localStorage.setItem(
       DOCTOR_KEY,
@@ -126,6 +253,16 @@ const [appointments, setAppointments] = useState(() =>
     (item) => item.status === "Completed"
   ).length;
 
+  // Save appointments and notify other pages
+  const updateAppointmentStorage = (updated) => {
+    saveAppointments(updated);
+    setAppointments(updated);
+
+    window.dispatchEvent(
+      new Event("appointments-updated")
+    );
+  };
+
   const openAddModal = () => {
     setForm(emptyForm);
     setEditId(null);
@@ -134,12 +271,12 @@ const [appointments, setAppointments] = useState(() =>
 
   const openEditModal = (item) => {
     setForm({
-      patient: item.patient || "",
+      patient: item.patient || item.patientName || "",
       phone: item.phone || "",
-      doctor: item.doctor || "",
+      doctor: item.doctor || item.doctorName || "",
       department: item.department || "",
-      date: item.date || "",
-      time: item.time || "",
+      date: item.date || item.appointmentDate || "",
+      time: item.time || item.appointmentTime || "",
       reason: item.reason || "",
       status: item.status || "Pending"
     });
@@ -148,161 +285,180 @@ const [appointments, setAppointments] = useState(() =>
     setShowModal(true);
   };
 
+  // Form changes
   const handleChange = (e) => {
     const { name, value } = e.target;
 
-    setForm((prev) => ({
-      ...prev,
-      [name]: value
-    }));
+    if (name === "patient") {
+      const selectedPatient = patients.find(
+        (patient) => getPatientName(patient) === value
+      );
+
+      if (!selectedPatient) {
+        setForm((prev) => ({
+          ...prev,
+          patient: value,
+          phone: ""
+        }));
+
+        return;
+      }
+
+      const details = getPatientDetails(selectedPatient);
+
+      setForm((prev) => ({
+        ...prev,
+        patient: value,
+        phone: details.phone
+      }));
+
+      return;
+    }
 
     if (name === "doctor") {
       const selectedDoctor = doctors.find(
         (doctor) => doctor.name === value
       );
 
-      if (selectedDoctor) {
-        setForm((prev) => ({
-          ...prev,
-          doctor: value,
-          department: selectedDoctor.department || ""
-        }));
-      }
+      setForm((prev) => ({
+        ...prev,
+        doctor: value,
+        department: selectedDoctor?.department || ""
+      }));
+
+      return;
     }
 
-    if (name === "patient") {
-      const selectedPatient = patients.find(
-        (patient) => patient.name === value
-      );
+    setForm((prev) => ({
+      ...prev,
+      [name]: value
+    }));
+  };
 
-      if (selectedPatient) {
-        setForm((prev) => ({
-          ...prev,
-          patient: value,
-          phone: selectedPatient.phone || ""
-        }));
-      }
+  // Save appointment
+  const handleSubmit = (e) => {
+    e.preventDefault();
+
+    if (
+      !form.patient ||
+      !form.phone ||
+      !form.doctor ||
+      !form.date ||
+      !form.time
+    ) {
+      alert("Please fill in all required fields.");
+      return;
     }
-  };
 
-  
-const handleSubmit = (e) => {
-  e.preventDefault();
-
-  if (
-    !form.patient ||
-    !form.phone ||
-    !form.doctor ||
-    !form.date ||
-    !form.time
-  ) {
-    alert("Please fill in all required fields.");
-    return;
-  }
-
-  const selectedPatient = patients.find(
-    (patient) => patient.name === form.patient
-  );
-
-  const appointmentData = {
-    ...form,
-
-    id: editId || `APT-${Date.now()}`,
-
-    patientName: form.patient,
-    patientId: selectedPatient?.patientId || selectedPatient?.id || "",
-    age: selectedPatient?.age || "",
-    gender: selectedPatient?.gender || "",
-
-    doctorName: form.doctor,
-    appointmentDate: form.date,
-    appointmentTime: form.time
-  };
-
-  let updatedAppointments;
-
-  if (editId) {
-    updatedAppointments = appointments.map((item) =>
-      item.id === editId ? appointmentData : item
+    const selectedPatient = patients.find(
+      (patient) => getPatientName(patient) === form.patient
     );
-  } else {
-    updatedAppointments = [
-      appointmentData,
-      ...appointments
-    ];
-  }
 
-  // Save to shared LocalStorage
-  saveAppointments(updatedAppointments);
+    if (!selectedPatient) {
+      alert("Selected patient was not found. Please refresh the patient list.");
+      return;
+    }
 
-  // Update Reception page
-  setAppointments(updatedAppointments);
+    const patientDetails = getPatientDetails(selectedPatient);
 
-  setShowModal(false);
-  setForm(emptyForm);
-  setEditId(null);
+    const existingAppointment = appointments.find(
+      (item) => item.id === editId
+    );
 
-  alert("Appointment saved successfully!");
-};
+    const appointmentData = {
+      ...existingAppointment,
+      ...form,
 
+      id: editId || `APT-${Date.now()}`,
 
+      patient: form.patient,
+      patientName: form.patient,
+
+      patientId: patientDetails.patientId,
+      age: patientDetails.age,
+      gender: patientDetails.gender,
+
+      phone: patientDetails.phone || form.phone,
+      email: patientDetails.email,
+      bloodGroup: patientDetails.bloodGroup,
+      address: patientDetails.address,
+
+      patientEmail: patientDetails.email,
+      patientBloodGroup: patientDetails.bloodGroup,
+      patientAddress: patientDetails.address,
+
+      doctor: form.doctor,
+      doctorName: form.doctor,
+
+      appointmentDate: form.date,
+      appointmentTime: form.time
+    };
+
+    let updatedAppointments;
+
+    if (editId) {
+      updatedAppointments = appointments.map((item) =>
+        item.id === editId ? appointmentData : item
+      );
+    } else {
+      updatedAppointments = [
+        appointmentData,
+        ...appointments
+      ];
+    }
+
+    updateAppointmentStorage(updatedAppointments);
+
+    setShowModal(false);
+    setForm(emptyForm);
+    setEditId(null);
+
+    alert("Appointment saved successfully!");
+  };
+
+  // Delete appointment
   const deleteAppointment = (id) => {
-  if (window.confirm("Delete this appointment?")) {
+    if (!window.confirm("Delete this appointment?")) {
+      return;
+    }
+
     const updated = appointments.filter(
       (item) => item.id !== id
     );
 
-    saveAppointments(updated);
-    setAppointments(updated);
-  }
-};
+    updateAppointmentStorage(updated);
+  };
 
-const updateStatus = (id, status) => {
-  const updated = appointments.map((item) =>
-    item.id === id ? { ...item, status } : item
-  );
+  // Update appointment status
+  const updateStatus = (id, status) => {
+    const updated = appointments.map((item) =>
+      item.id === id
+        ? { ...item, status }
+        : item
+    );
 
-  saveAppointments(updated);
-  setAppointments(updated);
-};
+    updateAppointmentStorage(updated);
+  };
 
+  // Search appointments
   const filteredAppointments = appointments.filter((item) => {
     const query = search.toLowerCase();
 
     return (
-      (item.patient || "").toLowerCase().includes(query) ||
-      (item.doctor || "").toLowerCase().includes(query) ||
-      (item.department || "").toLowerCase().includes(query) ||
-      (item.id || "").toLowerCase().includes(query)
+      (item.patient || item.patientName || "")
+        .toLowerCase()
+        .includes(query) ||
+      (item.doctor || item.doctorName || "")
+        .toLowerCase()
+        .includes(query) ||
+      (item.department || "")
+        .toLowerCase()
+        .includes(query) ||
+      String(item.id || "")
+        .toLowerCase()
+        .includes(query)
     );
   });
-
-
-const handleBookAppointment = () => {
-
-  const newAppointment = {
-    id: Date.now(),
-    patientId: "PAT001",
-    patientName: "Arun Kumar",
-    age: 35,
-    gender: "Male",
-    phone: "9876543210",
-
-    doctorName: "Dr. Kumar",
-    department: "Cardiology",
-
-    appointmentDate: "2026-11-20",
-    appointmentTime: "10:30 AM",
-
-    reason: "Chest Pain",
-    status: "Scheduled"
-  };
-
-  saveAppointment(newAppointment);
-
-  alert("Appointment sent successfully to Doctor Dashboard!");
-};
-
 
   const availableDoctors = doctors.filter(
     (doctor) => doctor.available === true
@@ -342,17 +498,19 @@ const handleBookAppointment = () => {
   return (
     <div className="appointment-page">
 
-      {/* Header */}
       <div className="appointment-page-heading">
         <div>
           <span className="appointment-eyebrow">
             HOSPITAL MANAGEMENT / APPOINTMENTS
           </span>
+
           <h1>Appointment Management</h1>
+
           <p>Schedule and manage patient appointments.</p>
         </div>
 
         <button
+          type="button"
           className="add-appointment-btn"
           onClick={openAddModal}
         >
@@ -398,7 +556,10 @@ const handleBookAppointment = () => {
 
         <div className="availability-list">
           {doctors.map((doctor) => (
-            <div className="availability-item" key={doctor.id}>
+            <div
+              className="availability-item"
+              key={doctor.id}
+            >
               <div className="availability-doctor-icon">
                 <Stethoscope size={19} />
               </div>
@@ -406,22 +567,28 @@ const handleBookAppointment = () => {
               <div className="availability-doctor-info">
                 <strong>{doctor.name}</strong>
                 <span>{doctor.department}</span>
-                <small>{doctor.hours || "Schedule not set"}</small>
+                <small>
+                  {doctor.hours || "Schedule not set"}
+                </small>
               </div>
 
               <span
                 className={`doctor-availability-status ${
-                  doctor.available ? "available" : "unavailable"
+                  doctor.available
+                    ? "available"
+                    : "unavailable"
                 }`}
               >
-                {doctor.available ? "Available" : "Unavailable"}
+                {doctor.available
+                  ? "Available"
+                  : "Unavailable"}
               </span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Appointment List */}
+      {/* Appointment Table */}
       <div className="appointment-table-panel">
         <div className="appointment-table-heading">
           <div>
@@ -431,6 +598,7 @@ const handleBookAppointment = () => {
 
           <div className="appointment-search">
             <Search size={18} />
+
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -479,13 +647,16 @@ const handleBookAppointment = () => {
                     <td>
                       <div className="appointment-patient">
                         <div className="appointment-avatar">
-                          {(item.patient || "P")
+                          {(item.patient || item.patientName || "P")
                             .charAt(0)
                             .toUpperCase()}
                         </div>
 
                         <div>
-                          <strong>{item.patient}</strong>
+                          <strong>
+                            {item.patient || item.patientName}
+                          </strong>
+
                           <small>
                             <Phone size={12} />
                             {item.phone}
@@ -496,7 +667,10 @@ const handleBookAppointment = () => {
 
                     <td>
                       <div className="appointment-doctor">
-                        <strong>{item.doctor}</strong>
+                        <strong>
+                          {item.doctor || item.doctorName}
+                        </strong>
+
                         <small>{item.department}</small>
                       </div>
                     </td>
@@ -505,11 +679,12 @@ const handleBookAppointment = () => {
                       <div className="appointment-date">
                         <span>
                           <CalendarDays size={14} />
-                          {item.date}
+                          {item.date || item.appointmentDate}
                         </span>
+
                         <small>
                           <Clock size={13} />
-                          {item.time}
+                          {item.time || item.appointmentTime}
                         </small>
                       </div>
                     </td>
@@ -534,6 +709,7 @@ const handleBookAppointment = () => {
                     <td>
                       <div className="appointment-actions">
                         <button
+                          type="button"
                           className="appointment-edit-btn"
                           title="Edit appointment"
                           onClick={() => openEditModal(item)}
@@ -542,9 +718,12 @@ const handleBookAppointment = () => {
                         </button>
 
                         <button
+                          type="button"
                           className="appointment-delete-btn"
                           title="Delete appointment"
-                          onClick={() => deleteAppointment(item.id)}
+                          onClick={() =>
+                            deleteAppointment(item.id)
+                          }
                         >
                           <Trash2 size={16} />
                         </button>
@@ -558,7 +737,9 @@ const handleBookAppointment = () => {
         </div>
 
         <div className="appointment-table-footer">
-          Showing {filteredAppointments.length} of {appointments.length} appointments
+          Showing {filteredAppointments.length} of{" "}
+          {appointments.length} appointments
+
           <span>{completedCount} completed</span>
         </div>
       </div>
@@ -580,12 +761,18 @@ const handleBookAppointment = () => {
 
               <div>
                 <h2>
-                  {editId ? "Edit Appointment" : "Book New Appointment"}
+                  {editId
+                    ? "Edit Appointment"
+                    : "Book New Appointment"}
                 </h2>
-                <p>Enter the patient and appointment details.</p>
+
+                <p>
+                  Enter the patient and appointment details.
+                </p>
               </div>
 
               <button
+                type="button"
                 className="appointment-close-btn"
                 onClick={() => setShowModal(false)}
               >
@@ -598,6 +785,7 @@ const handleBookAppointment = () => {
 
                 <div className="appointment-form-group full">
                   <label>Patient Name *</label>
+
                   <select
                     name="patient"
                     value={form.patient}
@@ -605,12 +793,21 @@ const handleBookAppointment = () => {
                     required
                   >
                     <option value="">Select patient</option>
-                    {patients.map((patient) => (
-                      <option key={patient.id} value={patient.name}>
-                        {patient.name}
-                      </option>
-                    ))}
+
+                    {patients.map((patient, index) => {
+                      const name = getPatientName(patient);
+
+                      return name ? (
+                        <option
+                          key={getPatientId(patient) || index}
+                          value={name}
+                        >
+                          {name}
+                        </option>
+                      ) : null;
+                    })}
                   </select>
+
                   {patients.length === 0 && (
                     <small className="appointment-form-hint">
                       No registered patients. Register a patient first.
@@ -620,6 +817,7 @@ const handleBookAppointment = () => {
 
                 <div className="appointment-form-group">
                   <label>Phone Number *</label>
+
                   <input
                     name="phone"
                     value={form.phone}
@@ -631,6 +829,7 @@ const handleBookAppointment = () => {
 
                 <div className="appointment-form-group">
                   <label>Doctor *</label>
+
                   <select
                     name="doctor"
                     value={form.doctor}
@@ -638,13 +837,20 @@ const handleBookAppointment = () => {
                     required
                   >
                     <option value="">Select doctor</option>
+
                     {doctors.map((doctor) => (
                       <option
                         key={doctor.id}
                         value={doctor.name}
-                        disabled={!doctor.available && doctor.name !== form.doctor}
+                        disabled={
+                          !doctor.available &&
+                          doctor.name !== form.doctor
+                        }
                       >
-                        {doctor.name} {!doctor.available ? "(Unavailable)" : ""}
+                        {doctor.name}
+                        {!doctor.available
+                          ? " (Unavailable)"
+                          : ""}
                       </option>
                     ))}
                   </select>
@@ -652,10 +858,10 @@ const handleBookAppointment = () => {
 
                 <div className="appointment-form-group">
                   <label>Department</label>
+
                   <input
                     name="department"
                     value={form.department}
-                    onChange={handleChange}
                     placeholder="Department"
                     readOnly
                   />
@@ -663,6 +869,7 @@ const handleBookAppointment = () => {
 
                 <div className="appointment-form-group">
                   <label>Appointment Date *</label>
+
                   <input
                     type="date"
                     name="date"
@@ -675,6 +882,7 @@ const handleBookAppointment = () => {
 
                 <div className="appointment-form-group">
                   <label>Appointment Time *</label>
+
                   <input
                     type="time"
                     name="time"
@@ -686,6 +894,7 @@ const handleBookAppointment = () => {
 
                 <div className="appointment-form-group full">
                   <label>Reason for Visit</label>
+
                   <textarea
                     name="reason"
                     value={form.reason}
@@ -697,6 +906,7 @@ const handleBookAppointment = () => {
 
                 <div className="appointment-form-group full">
                   <label>Appointment Status</label>
+
                   <select
                     name="status"
                     value={form.status}
@@ -723,10 +933,13 @@ const handleBookAppointment = () => {
                 <button
                   type="submit"
                   className="appointment-save-btn"
-                  disabled={patients.length === 0 || availableDoctors.length === 0}
+                  disabled={patients.length === 0}
                 >
                   <CalendarCheck size={17} />
-                  {editId ? "Update Appointment" : "Save Appointment"}
+
+                  {editId
+                    ? "Update Appointment"
+                    : "Save Appointment"}
                 </button>
               </div>
             </form>
@@ -734,9 +947,6 @@ const handleBookAppointment = () => {
         </div>
       )}
 
-{/* <button onClick={handleBookAppointment}>
-  Test Book Appointment
-</button> */}
     </div>
   );
 }
